@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-MCQ Screen Solver — FREE version (Groq)
-----------------------------------------
+MCQ Screen Solver — FREE version (Groq + dxcam)
+------------------------------------------------
 Controls:
   ↑  Arrow Up   → Capture screen & get answer
   ↓  Arrow Down → Hide the overlay window
   ESC           → Quit
 
 Setup:
-  pip install groq pynput pillow
+  pip install groq pynput pillow dxcam
   set GROQ_API_KEY=your-key-here
   python mcq_solver_free.py
 """
@@ -19,16 +19,27 @@ import base64
 import threading
 import tkinter as tk
 from io import BytesIO
-from PIL import ImageGrab, Image
-from groq import Groq
+from PIL import Image
 from pynput import keyboard
 
 # ── Config ───────────────────────────────────────────────────────────────────
 API_KEY = os.environ.get("GROQ_API_KEY", "")
-MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"  # free, fast, vision
+MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"
 # ─────────────────────────────────────────────────────────────────────────────
 
+from groq import Groq
 client = Groq(api_key=API_KEY) if API_KEY else None
+
+# ── dxcam setup ───────────────────────────────────────────────────────────────
+try:
+    import dxcam
+    camera = dxcam.create()
+    USE_DXCAM = True
+    print("[+] dxcam loaded — using DirectX capture")
+except Exception as e:
+    from PIL import ImageGrab
+    USE_DXCAM = False
+    print(f"[!] dxcam not available ({e}), falling back to ImageGrab")
 
 
 # ── Overlay window ────────────────────────────────────────────────────────────
@@ -107,15 +118,26 @@ class OverlayWindow:
         self.root.mainloop()
 
 
-# ── Screenshot + Groq call ────────────────────────────────────────────────────
+# ── Screenshot ────────────────────────────────────────────────────────────────
 def screenshot_to_b64():
-    img = ImageGrab.grab()
+    if USE_DXCAM:
+        frame = camera.grab()
+        if frame is None:
+            # retry once
+            import time
+            time.sleep(0.2)
+            frame = camera.grab()
+        img = Image.fromarray(frame)
+    else:
+        img = ImageGrab.grab()
+
     img = img.resize((1280, 720), Image.LANCZOS)
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=85)
     return base64.b64encode(buf.getvalue()).decode()
 
 
+# ── Groq call ─────────────────────────────────────────────────────────────────
 def ask_groq(b64_img):
     if not client:
         return "GROQ_API_KEY not set.", "get free key at console.groq.com"
@@ -137,9 +159,7 @@ def ask_groq(b64_img):
                 "content": [
                     {
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64_img}"
-                        }
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
                     },
                     {
                         "type": "text",
@@ -215,7 +235,8 @@ if __name__ == "__main__":
     listener.daemon = True
     listener.start()
 
-    print("MCQ Solver (Groq Free) running.")
+    capture_method = "dxcam (DirectX)" if USE_DXCAM else "ImageGrab (fallback)"
+    print(f"MCQ Solver running — capture: {capture_method}")
     print("  ↑  = capture screen & answer")
     print("  ↓  = hide window")
     print("  ESC = quit")
