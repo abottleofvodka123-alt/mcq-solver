@@ -1,0 +1,3 @@
+@echo off
+set GROQ_API_KEY=set GROQ_API_KEY=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
+start dist\mcq_solver_free.exe
