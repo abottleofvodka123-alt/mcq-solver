@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-MCQ Screen Solver — FREE version (Groq + dxcam)
-------------------------------------------------
+MCQ Screen Solver — FREE version (Groq + dxcam + toast notifications)
+----------------------------------------------------------------------
 Controls:
   ↑  Arrow Up   → Capture screen & get answer
   ↓  Arrow Down → Hide the overlay window
   ESC           → Quit
 
 Setup:
-  pip install groq pynput pillow dxcam
+  pip install groq pynput pillow dxcam win10toast
   set GROQ_API_KEY=your-key-here
   python mcq_solver_free.py
 """
@@ -41,8 +41,18 @@ except Exception as e:
     USE_DXCAM = False
     print(f"[!] dxcam not available ({e}), falling back to ImageGrab")
 
+# ── Toast setup ───────────────────────────────────────────────────────────────
+try:
+    from win10toast import ToastNotifier
+    toaster = ToastNotifier()
+    USE_TOAST = True
+    print("[+] win10toast loaded — answers will show as notifications")
+except Exception:
+    USE_TOAST = False
+    print("[!] win10toast not available, using overlay window")
 
-# ── Overlay window ────────────────────────────────────────────────────────────
+
+# ── Overlay window (fallback if toast not available) ──────────────────────────
 class OverlayWindow:
     def __init__(self):
         self.root = tk.Tk()
@@ -123,7 +133,6 @@ def screenshot_to_b64():
     if USE_DXCAM:
         frame = camera.grab()
         if frame is None:
-            # retry once
             import time
             time.sleep(0.2)
             frame = camera.grab()
@@ -194,18 +203,36 @@ def ask_groq(b64_img):
 overlay = None
 
 def on_capture():
-    overlay.set_thinking()
+    if not USE_TOAST:
+        overlay.set_thinking()
     try:
         b64 = screenshot_to_b64()
         answer, meta = ask_groq(b64)
-        def update(a=answer, m=meta):
-            overlay.set_answer(a, m)
-        overlay.root.after(0, update)
+
+        if USE_TOAST:
+            # show as windows notification — bypasses SEB overlay block
+            threading.Thread(
+                target=lambda: toaster.show_toast(
+                    "MCQ Answer",
+                    answer,
+                    duration=10,
+                    threaded=True
+                ),
+                daemon=True
+            ).start()
+        else:
+            def update(a=answer, m=meta):
+                overlay.set_answer(a, m)
+            overlay.root.after(0, update)
+
     except Exception as ex:
         err = str(ex)[:120]
-        def show_err(e=err):
-            overlay.set_error(e)
-        overlay.root.after(0, show_err)
+        if USE_TOAST:
+            toaster.show_toast("MCQ Solver Error", err, duration=5, threaded=True)
+        else:
+            def show_err(e=err):
+                overlay.set_error(e)
+            overlay.root.after(0, show_err)
 
 
 def on_press(key):
@@ -213,9 +240,13 @@ def on_press(key):
         if key == keyboard.Key.up:
             threading.Thread(target=on_capture, daemon=True).start()
         elif key == keyboard.Key.down:
-            overlay.root.after(0, overlay.hide)
+            if not USE_TOAST:
+                overlay.root.after(0, overlay.hide)
         elif key == keyboard.Key.esc:
-            overlay.root.after(0, overlay.root.quit)
+            if not USE_TOAST:
+                overlay.root.after(0, overlay.root.quit)
+            else:
+                sys.exit(0)
             return False
     except Exception:
         pass
@@ -229,17 +260,24 @@ if __name__ == "__main__":
         print("    Then run: set GROQ_API_KEY=your-key   (Windows)")
         sys.exit(1)
 
-    overlay = OverlayWindow()
-
-    listener = keyboard.Listener(on_press=on_press)
-    listener.daemon = True
-    listener.start()
-
     capture_method = "dxcam (DirectX)" if USE_DXCAM else "ImageGrab (fallback)"
-    print(f"MCQ Solver running — capture: {capture_method}")
-    print("  ↑  = capture screen & answer")
-    print("  ↓  = hide window")
-    print("  ESC = quit")
+    output_method  = "Windows Toast Notifications" if USE_TOAST else "Overlay Window"
+    print(f"MCQ Solver running")
+    print(f"  Capture : {capture_method}")
+    print(f"  Output  : {output_method}")
+    print(f"  ↑  = capture screen & answer")
+    print(f"  ↓  = hide window")
+    print(f"  ESC = quit")
 
-    overlay.run()
-    listener.stop()
+    if USE_TOAST:
+        # no tkinter window needed, just keep main thread alive
+        listener = keyboard.Listener(on_press=on_press)
+        listener.start()
+        listener.join()
+    else:
+        overlay = OverlayWindow()
+        listener = keyboard.Listener(on_press=on_press)
+        listener.daemon = True
+        listener.start()
+        overlay.run()
+        listener.stop()
