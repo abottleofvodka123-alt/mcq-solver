@@ -1,6 +1,5 @@
 groq
 pynput
 pillow
-dxcam
 win10toast
 pygame
