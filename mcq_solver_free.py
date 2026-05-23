@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-MCQ Screen Solver — DirectX overlay version (pygame)
------------------------------------------------------
+MCQ Screen Solver — disguised as battery/wifi popup
+----------------------------------------------------
 Controls:
   ↑  Arrow Up   → Capture screen & get answer
   ↓  Arrow Down → Hide the overlay
@@ -23,6 +23,7 @@ from io import BytesIO
 from PIL import Image
 from pynput import keyboard
 from groq import Groq
+import tkinter as tk
 
 # ── Config ───────────────────────────────────────────────────────────────────
 API_KEY = os.environ.get("GROQ_API_KEY", "")
@@ -36,55 +37,9 @@ try:
     import dxcam
     camera = dxcam.create()
     USE_DXCAM = True
-    print("[+] dxcam loaded")
-except Exception as e:
+except Exception:
     from PIL import ImageGrab
     USE_DXCAM = False
-    print(f"[!] dxcam fallback: {e}")
-
-# ── toast setup ───────────────────────────────────────────────────────────────
-try:
-    from win10toast import ToastNotifier
-    toaster = ToastNotifier()
-    USE_TOAST = True
-    print("[+] win10toast loaded")
-except Exception:
-    USE_TOAST = False
-
-# ── pygame overlay ────────────────────────────────────────────────────────────
-import pygame
-import pygame.locals as pl
-
-# Windows API for layered/transparent window
-GWL_EXSTYLE    = -20
-WS_EX_LAYERED  = 0x00080000
-WS_EX_TRANSPARENT = 0x00000020
-WS_EX_TOPMOST  = 0x00000008
-WS_EX_TOOLWINDOW = 0x00000080
-LWA_COLORKEY   = 0x00000001
-LWA_ALPHA      = 0x00000002
-HWND_TOPMOST   = -1
-SWP_NOMOVE     = 0x0002
-SWP_NOSIZE     = 0x0001
-
-user32 = ctypes.windll.user32
-TRANSPARENT_COLOR = (1, 1, 1)   # key color we make transparent
-
-# ── Shared state ──────────────────────────────────────────────────────────────
-state = {
-    "visible": False,
-    "answer": "Press ↑ to scan",
-    "meta": "",
-    "thinking": False,
-    "dirty": True,
-}
-state_lock = threading.Lock()
-
-
-def set_state(**kwargs):
-    with state_lock:
-        state.update(kwargs)
-        state["dirty"] = True
 
 
 # ── Screenshot ────────────────────────────────────────────────────────────────
@@ -145,157 +100,165 @@ def ask_groq(b64_img):
     return f"Q: {q}\n\nANS: {ans}", reason
 
 
-# ── Capture thread ────────────────────────────────────────────────────────────
+# ── Overlay — disguised as battery/wifi popup ─────────────────────────────────
+class BatteryPopup:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.overrideredirect(True)          # no title bar
+        self.root.attributes("-topmost", True)
+        self.root.attributes("-alpha", 0.95)
+        self.root.configure(bg="#2b2b2b")
+
+        # position bottom right like a real windows popup
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        W, H = 320, 160
+        x = sw - W - 12
+        y = sh - H - 48        # just above taskbar
+        self.root.geometry(f"{W}x{H}+{x}+{y}")
+        self.W = W
+        self.H = H
+
+        # ── header row (mimics windows popup header) ──
+        header = tk.Frame(self.root, bg="#2b2b2b")
+        header.pack(fill="x", padx=12, pady=(10, 4))
+
+        # battery icon (unicode)
+        tk.Label(
+            header, text="🔋", font=("Segoe UI", 14),
+            bg="#2b2b2b", fg="white"
+        ).pack(side="left")
+
+        tk.Label(
+            header, text="Battery & Network",
+            font=("Segoe UI", 11, "bold"),
+            bg="#2b2b2b", fg="white"
+        ).pack(side="left", padx=6)
+
+        # wifi icon right side
+        tk.Label(
+            header, text="📶", font=("Segoe UI", 12),
+            bg="#2b2b2b", fg="white"
+        ).pack(side="right")
+
+        # ── divider ──
+        tk.Frame(self.root, bg="#444", height=1).pack(fill="x", padx=12)
+
+        # ── answer content area ──
+        self.answer_var = tk.StringVar(value="Checking network status…")
+        self.answer_label = tk.Label(
+            self.root,
+            textvariable=self.answer_var,
+            font=("Segoe UI", 10),
+            bg="#2b2b2b", fg="#d4f5d4",
+            wraplength=290,
+            justify="left",
+            anchor="nw",
+            padx=12, pady=6
+        )
+        self.answer_label.pack(fill="both", expand=True)
+
+        # ── footer (mimics windows popup footer) ──
+        footer = tk.Frame(self.root, bg="#222")
+        footer.pack(fill="x")
+        self.meta_var = tk.StringVar(value="Connected · 87% · Charging")
+        tk.Label(
+            footer,
+            textvariable=self.meta_var,
+            font=("Segoe UI", 8),
+            bg="#222", fg="#888",
+            padx=12, pady=4
+        ).pack(side="left")
+
+        # rounded corner illusion via border
+        self.root.configure(highlightbackground="#555", highlightthickness=1)
+
+        # start hidden
+        self.root.withdraw()
+
+    def set_thinking(self):
+        self.answer_var.set("Checking network status…")
+        self.meta_var.set("Scanning… please wait")
+        self._resize()
+        self.root.deiconify()
+
+    def set_answer(self, answer, meta=""):
+        self.answer_var.set(answer)
+        self.meta_var.set(meta if meta else "Connected · 87% · Charging")
+        self._resize()
+        self.root.deiconify()
+
+    def set_error(self, msg):
+        self.answer_var.set(f"Network error: {msg}")
+        self.meta_var.set("Reconnecting…")
+        self._resize()
+        self.root.deiconify()
+
+    def _resize(self):
+        text  = self.answer_var.get()
+        lines = text.count("\n") + 1
+        H     = max(160, 100 + lines * 22)
+        sw    = self.root.winfo_screenwidth()
+        sh    = self.root.winfo_screenheight()
+        x     = sw - self.W - 12
+        y     = sh - H - 48
+        self.root.geometry(f"{self.W}x{H}+{x}+{y}")
+
+    def hide(self):
+        self.root.withdraw()
+
+    def run(self):
+        self.root.mainloop()
+
+
+# ── Keyboard listener ─────────────────────────────────────────────────────────
+overlay = None
+
 def on_capture():
-    set_state(visible=True, thinking=True, answer="Analysing…", meta="")
+    overlay.root.after(0, overlay.set_thinking)
     try:
-        b64     = screenshot_to_b64()
+        b64 = screenshot_to_b64()
         ans, meta = ask_groq(b64)
-        set_state(thinking=False, answer=ans, meta=meta, visible=True)
-        if USE_TOAST:
-            threading.Thread(
-                target=lambda: toaster.show_toast("MCQ", ans, duration=10, threaded=True),
-                daemon=True
-            ).start()
+        def update(a=ans, m=meta):
+            overlay.set_answer(a, m)
+        overlay.root.after(0, update)
     except Exception as ex:
-        set_state(thinking=False, answer=f"Error: {str(ex)[:100]}", visible=True)
+        err = str(ex)[:100]
+        def show_err(e=err):
+            overlay.set_error(e)
+        overlay.root.after(0, show_err)
 
 
-# ── Keyboard ──────────────────────────────────────────────────────────────────
 def on_press(key):
     try:
         if key == keyboard.Key.up:
             threading.Thread(target=on_capture, daemon=True).start()
         elif key == keyboard.Key.down:
-            set_state(visible=False)
+            overlay.root.after(0, overlay.hide)
         elif key == keyboard.Key.esc:
-            pygame.event.post(pygame.event.Event(pygame.QUIT))
+            overlay.root.after(0, overlay.root.quit)
             return False
     except Exception:
         pass
 
 
-# ── Pygame overlay loop ───────────────────────────────────────────────────────
-def wrap_text(font, text, max_width):
-    lines = []
-    for paragraph in text.split("\n"):
-        words = paragraph.split(" ")
-        current = ""
-        for word in words:
-            test = (current + " " + word).strip()
-            if font.size(test)[0] <= max_width:
-                current = test
-            else:
-                if current:
-                    lines.append(current)
-                current = word
-        if current:
-            lines.append(current)
-        lines.append("")   # blank line between paragraphs
-    return lines[:-1]      # remove trailing blank
-
-
-def run_overlay():
-    os.environ["SDL_VIDEO_WINDOW_POS"] = "30,30"
-
-    pygame.init()
-    W, H = 440, 180
-    flags = pygame.NOFRAME | pygame.SRCALPHA
-    screen = pygame.display.set_mode((W, H), flags)
-    pygame.display.set_caption("MCQ")
-
-    # Make window transparent + always on top via Win32
-    hwnd = pygame.display.get_wm_info()["window"]
-    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE,
-        style | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW)
-    user32.SetLayeredWindowAttributes(hwnd, 0, 0, LWA_COLORKEY)
-    # colorkey: render TRANSPARENT_COLOR as see-through
-    user32.SetLayeredWindowAttributes(
-        hwnd,
-        (TRANSPARENT_COLOR[0] | TRANSPARENT_COLOR[1] << 8 | TRANSPARENT_COLOR[2] << 16),
-        220,
-        LWA_COLORKEY | LWA_ALPHA
-    )
-    user32.SetWindowPos(hwnd, HWND_TOPMOST, 30, 30, W, H, SWP_NOMOVE | SWP_NOSIZE)
-
-    font_ans  = pygame.font.SysFont("Consolas", 14, bold=True)
-    font_meta = pygame.font.SysFont("Consolas", 11)
-    font_hint = pygame.font.SysFont("Consolas", 10)
-
-    BG       = (13, 13, 13)
-    GREEN    = (0, 255, 136)
-    GREY     = (80, 80, 80)
-    ORANGE   = (243, 156, 18)
-    RED      = (231, 76, 60)
-    TRANSP   = TRANSPARENT_COLOR
-
-    clock = pygame.time.Clock()
-
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                return
-
-        with state_lock:
-            visible  = state["visible"]
-            answer   = state["answer"]
-            meta     = state["meta"]
-            thinking = state["thinking"]
-
-        if not visible:
-            screen.fill(TRANSP)
-            pygame.display.flip()
-            clock.tick(10)
-            continue
-
-        screen.fill(BG)
-
-        # dot indicator
-        dot_color = ORANGE if thinking else GREEN
-        pygame.draw.circle(screen, dot_color, (W - 16, 14), 5)
-
-        # hint
-        hint = font_hint.render("↑ capture  ↓ hide  ESC quit", True, GREY)
-        screen.blit(hint, (10, 8))
-
-        # answer text
-        lines = wrap_text(font_ans, answer, W - 20)
-        y = 28
-        for line in lines:
-            surf = font_ans.render(line, True, GREEN)
-            screen.blit(surf, (10, y))
-            y += 18
-            if y > H - 30:
-                break
-
-        # meta
-        if meta:
-            m = font_meta.render(meta[:60], True, GREY)
-            screen.blit(m, (10, H - 18))
-
-        # border
-        pygame.draw.rect(screen, (30, 30, 30), (0, 0, W, H), 1)
-
-        pygame.display.flip()
-        clock.tick(30)
-
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     if not API_KEY:
-        print("[!] GROQ_API_KEY not set. Get free key at console.groq.com")
+        print("[!] GROQ_API_KEY not set.")
+        print("    Get free key at: https://console.groq.com")
         sys.exit(1)
+
+    overlay = BatteryPopup()
 
     listener = keyboard.Listener(on_press=on_press)
     listener.daemon = True
     listener.start()
 
-    print("MCQ Solver (pygame DirectX overlay) running")
+    print("MCQ Solver running — disguised as battery/wifi popup")
     print("  ↑  = capture & answer")
     print("  ↓  = hide")
     print("  ESC = quit")
 
-    run_overlay()
+    overlay.run()
     listener.stop()
