@@ -1,5 +1,4 @@
 @echo off
 set GROQ_API_KEY=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
-pip install -r requirements.txt -q
-python mcq_solver_free.py
+dist\mcq_solver_free.exe
 pause
