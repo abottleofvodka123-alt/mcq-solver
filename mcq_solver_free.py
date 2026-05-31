@@ -35,30 +35,32 @@ class Overlay:
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", 0.0)  # start invisible
+        self.root.attributes("-alpha", 0.0)
         self.root.configure(bg="#000001")
         self.root.wm_attributes("-transparentcolor", "#000001")
 
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        self.root.geometry(f"300x28+{sw-320}+{sh-60}")
+        self.root.geometry(f"460x26+{sw-480}+{sh-52}")
 
         self.var = tk.StringVar(value="")
         tk.Label(
             self.root, textvariable=self.var,
-            font=("Segoe UI", 13, "bold"),
-            fg="#1E90FF", bg="#000001",
+            font=("Consolas", 11),
+            fg="#d4d4d4",
+            bg="#000001",
             padx=6, pady=2
         ).pack()
         self.root.withdraw()
 
     def show(self, text):
         self.var.set(text)
-        self.root.attributes("-alpha", 0.92)
+        self.root.attributes("-alpha", 0.90)
         self.root.deiconify()
 
     def hide(self):
         self.root.withdraw()
+        self.root.attributes("-alpha", 0.0)
 
     def run(self):
         self.root.mainloop()
@@ -66,13 +68,14 @@ class Overlay:
 overlay = None
 
 def on_capture():
-    overlay.root.after(0, lambda: overlay.show("..."))
+    overlay.root.after(0, lambda: overlay.show("↻  Scanning..."))
     try:
         b64 = screenshot_to_b64()
         ans = ask_groq(b64)
-        overlay.root.after(0, lambda a=ans: overlay.show(a))
+        overlay.root.after(0, lambda a=ans: overlay.show(f"✓  {a}"))
     except Exception as e:
-        overlay.root.after(0, lambda: overlay.show("ERR"))
+        print(f"[ERR] {e}")
+        overlay.root.after(0, lambda: overlay.show("✗  Error"))
 
 def on_press(key):
     try:
