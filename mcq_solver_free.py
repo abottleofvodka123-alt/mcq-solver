@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, sys, base64, threading, time
+import os, sys, base64, threading
 from io import BytesIO
 from PIL import ImageGrab, Image
 from pynput import keyboard
@@ -7,14 +7,14 @@ from groq import Groq
 import tkinter as tk
 
 API_KEY = os.environ.get("GROQ_API_KEY", "")
-MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"
+MODEL = "llama-3.2-90b-vision-preview"
 client  = Groq(api_key=API_KEY) if API_KEY else None
 
 def screenshot_to_b64():
     img = ImageGrab.grab()
-    img = img.resize((1280, 720), Image.LANCZOS)
+    img = img.resize((1920, 1080), Image.LANCZOS)
     buf = BytesIO()
-    img.save(buf, format="JPEG", quality=85)
+    img.save(buf, format="JPEG", quality=95)
     return base64.b64encode(buf.getvalue()).decode()
 
 def ask_groq(b64):
@@ -24,9 +24,14 @@ def ask_groq(b64):
         model=MODEL,
         messages=[{"role":"user","content":[
             {"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}},
-            {"type":"text","text":"Find the MCQ in this screenshot. Reply ONLY with the correct option letter and text, nothing else. Example: C) Paris. If no MCQ found reply: -"}
+            {"type":"text","text":(
+                "Find the MCQ in this screenshot.\n"
+                "Reply with ONLY the option letter. Single letter only.\n"
+                "Example: C\n"
+                "If no MCQ visible, reply: -"
+            )}
         ]}],
-        max_tokens=60,
+        max_tokens=5,
     )
     return r.choices[0].message.content.strip()
 
@@ -38,15 +43,13 @@ class Overlay:
         self.root.attributes("-alpha", 0.0)
         self.root.configure(bg="#000001")
         self.root.wm_attributes("-transparentcolor", "#000001")
-
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        self.root.geometry(f"460x26+{sw-480}+{sh-52}")
-
+        self.root.geometry(f"120x26+{sw-140}+{sh-52}")
         self.var = tk.StringVar(value="")
         tk.Label(
             self.root, textvariable=self.var,
-            font=("Consolas", 11),
+            font=("Consolas", 13, "bold"),
             fg="#d4d4d4",
             bg="#000001",
             padx=6, pady=2
@@ -68,14 +71,14 @@ class Overlay:
 overlay = None
 
 def on_capture():
-    overlay.root.after(0, lambda: overlay.show("↻  Scanning..."))
+    overlay.root.after(0, lambda: overlay.show("..."))
     try:
         b64 = screenshot_to_b64()
         ans = ask_groq(b64)
-        overlay.root.after(0, lambda a=ans: overlay.show(f"✓  {a}"))
+        overlay.root.after(0, lambda a=ans: overlay.show(a))
     except Exception as e:
         print(f"[ERR] {e}")
-        overlay.root.after(0, lambda: overlay.show("✗  Error"))
+        overlay.root.after(0, lambda: overlay.show("ERR"))
 
 def on_press(key):
     try:
