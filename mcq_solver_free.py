@@ -7,7 +7,7 @@ from groq import Groq
 import tkinter as tk
 
 API_KEY = os.environ.get("GROQ_API_KEY", "")
-MODEL = "llama-3.2-90b-vision-preview"
+MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"
 client  = Groq(api_key=API_KEY) if API_KEY else None
 
 def screenshot_to_b64():
