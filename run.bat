@@ -1,4 +1,4 @@
 @echo off
-set GROQ_API_KEY=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
+set GROQ_API_KEY=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
 dist\mcq_solver_free.exe
 pause
